@@ -1,0 +1,48 @@
+@switch (Rep)
+{
+    case Rep.Symbol:
+        <span class="rep-sym @(Compact ? "compact" : "")">@Value</span>
+        break;
+    case Rep.Phonetic:
+        <span class="rep-phon @(Compact ? "compact" : "")">@Value</span>
+        break;
+    case Rep.Flag:
+        <FlagView Id="@Value" Height="@(Compact ? 64 : 112)" />
+        break;
+    case Rep.MorseAudio:
+        <MorseButton Code="@Value" Label="@(Compact ? null : "Play")" Class="@(Compact ? "small" : "big")" AutoPlay="@AutoPlay" />
+        break;
+    case Rep.MorseVisual:
+        <MorseView Code="@Value" Class="@(Compact ? "compact" : "large")" />
+        break;
+    case Rep.MarkImage:
+        <BuoyView MarkId="@Value" Height="@(Compact ? 118 : 200)" />
+        break;
+    case Rep.Topmark:
+        <BuoyView MarkId="@Value" TopmarkOnly="true" Height="@(Compact ? 70 : 118)" />
+        break;
+    case Rep.LightAnim:
+        <span class="rep-light @(Compact ? "compact" : "")">
+            <LightView SpecKey="@Value" Class="@(Compact ? "small" : "large")" />
+            @if (Lights.Find(Value) is { } spec)
+            {
+                <LightTimeline Spec="@spec" Compact="true" />
+            }
+        </span>
+        break;
+    case Rep.LightAbbr:
+        <code class="rep-abbr @(Compact ? "compact" : "")">@Value</code>
+        break;
+    default:
+        <span class="rep-text @(Compact ? "compact" : "")">@Value</span>
+        break;
+}
+
+@code {
+    [Parameter, EditorRequired] public Rep Rep { get; set; }
+    [Parameter, EditorRequired] public string Value { get; set; } = "";
+    /// <summary>Smaller rendering used inside answer buttons and cards.</summary>
+    [Parameter] public bool Compact { get; set; }
+    /// <summary>For Morse sound: play as soon as shown.</summary>
+    [Parameter] public bool AutoPlay { get; set; }
+}

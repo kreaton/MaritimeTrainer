@@ -1,0 +1,131 @@
+@page "/signals"
+
+<PageTitle>Study – Signal flags, Morse &amp; phonetics</PageTitle>
+
+<h1>🏴 Signal flags, Morse &amp; phonetics</h1>
+<div class="row gap wrap">
+    <a class="btn primary" href="quiz/signals">Quiz me</a>
+    <a class="btn" href="flashcards/signals">Flashcards</a>
+</div>
+
+<div class="chips tabs">
+    @foreach (var (id, title) in Tabs)
+    {
+        var t = id;
+        <button type="button" class="chip @(_tab == t ? "active" : "")" @onclick="() => _tab = t">@title</button>
+    }
+</div>
+
+@if (_tab == "letters" || _tab == "numbers")
+{
+    var entries = _tab == "letters" ? SignalData.Letters : SignalData.Numbers;
+    <div class="study-grid">
+        @foreach (var e in entries)
+        {
+            var morse = Morse.For(e.Symbol[0])!;
+            <article class="sig-card">
+                <div class="sig-flag"><FlagView Id="@e.Symbol" Height="84" /></div>
+                <div class="sig-sym">@e.Symbol</div>
+                <div class="sig-phon">@e.Phonetic</div>
+                @if (e.CodeWord != e.Phonetic)
+                {
+                    <div class="sig-code">ICS: @e.CodeWord</div>
+                }
+                <div class="sig-morse"><MorseView Code="@morse" /></div>
+                <MorseButton Code="@morse" Class="small" Label="Play" />
+            </article>
+        }
+    </div>
+    @if (_tab == "numbers")
+    {
+        <p class="muted">
+            Numbers in flag signals use the <strong>numeral pennants</strong>. The spoken forms follow the IMO/ICAO convention
+            (Tree, Fower, Fife, Niner); the long forms (Unaone, Bissotwo…) are the ICS code words and are also accepted when typing.
+        </p>
+    }
+}
+else if (_tab == "meanings")
+{
+    <p class="muted">What each letter flag means when it is flown <strong>on its own</strong> (International Code of Signals, single-letter signals).</p>
+    <div class="list">
+        @foreach (var e in SignalData.Letters)
+        {
+            <article class="meaning-row">
+                <FlagView Id="@e.Symbol" Height="64" />
+                <div>
+                    <div class="meaning-title"><strong>@e.Symbol</strong> – @e.Phonetic</div>
+                    <div>@e.Meaning</div>
+                    @if (e.Note is not null) { <div class="muted">@e.Note</div> }
+                </div>
+            </article>
+        }
+    </div>
+}
+else if (_tab == "combos")
+{
+    <p class="muted">Two-flag signals read from the top of the hoist downwards. A few every mariner should recognise:</p>
+    <div class="list">
+        @foreach (var (hoist, meaning) in SignalData.Combinations)
+        {
+            <article class="meaning-row">
+                <div class="hoist">
+                    @foreach (var ch in hoist) { <FlagView Id="@ch.ToString()" Height="46" /> }
+                </div>
+                <div>
+                    <div class="meaning-title"><strong>@hoist</strong></div>
+                    <div>@meaning</div>
+                </div>
+            </article>
+        }
+    </div>
+    <h2>Pennants</h2>
+    <div class="list">
+        <article class="meaning-row">
+            <FlagView Id="ANS" Height="56" />
+            <div>
+                <div class="meaning-title"><strong>Code / answering pennant</strong></div>
+                <div>Red and white vertical stripes. Flown at the dip it means “I have seen your signal but not yet understood it”; close up it means “understood”. Also marks numerals and decimal points in a hoist.</div>
+            </div>
+        </article>
+        <article class="meaning-row">
+            <div class="hoist"><span class="muted">1st – 3rd</span></div>
+            <div>
+                <div class="meaning-title"><strong>Substitute pennants</strong></div>
+                <div>Triangular repeaters: each one repeats the 1st, 2nd or 3rd flag (or pennant) of the same hoist, so one set of flags can spell a signal with repeated letters, such as “AA” or “112”.</div>
+            </div>
+        </article>
+    </div>
+}
+else
+{
+    <p class="muted">
+        A dit is one unit; a dah is three units. The gap between parts of a letter is one unit, between letters three, and between words seven.
+        The speed is set in <a href="settings">Settings</a>.
+    </p>
+    <div class="list">
+        @foreach (var (name, pattern, meaning) in Morse.Prosigns)
+        {
+            <article class="meaning-row">
+                <div class="hoist"><strong>@name</strong></div>
+                <div class="grow">
+                    <div><MorseView Code="@pattern" /></div>
+                    <div class="muted">@meaning</div>
+                </div>
+                <MorseButton Code="@pattern" Class="small" />
+            </article>
+        }
+    </div>
+}
+
+@code {
+    private string _tab = "letters";
+
+    private static readonly (string Id, string Title)[] Tabs =
+    [
+        ("letters", "Letters"),
+        ("numbers", "Numbers"),
+        ("meanings", "Single-flag meanings"),
+        ("combos", "Distress & pennants"),
+        ("morse", "Morse extras"),
+    ];
+}

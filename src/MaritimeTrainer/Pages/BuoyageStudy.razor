@@ -1,0 +1,124 @@
+@page "/buoyage"
+@inject SettingsService Settings
+
+<PageTitle>Study – IALA buoyage</PageTitle>
+
+<h1>🛟 IALA buoyage</h1>
+<div class="row gap wrap">
+    <a class="btn primary" href="quiz/buoys">Quiz me</a>
+    <a class="btn" href="flashcards/buoys">Flashcards</a>
+</div>
+
+<section class="panel">
+    <h2>Region</h2>
+    <div class="chips">
+        <button type="button" class="chip @(Region == MaritimeTrainer.Models.Region.A ? "active" : "")" @onclick="() => SetRegionAsync(MaritimeTrainer.Models.Region.A)">Region A – Europe, Africa, Asia, Australasia</button>
+        <button type="button" class="chip @(Region == MaritimeTrainer.Models.Region.B ? "active" : "")" @onclick="() => SetRegionAsync(MaritimeTrainer.Models.Region.B)">Region B – the Americas, Japan, Korea, Philippines</button>
+    </div>
+    <p class="muted">Only the colours of lateral marks differ between regions. Cardinal, isolated danger, safe water, special and wreck marks are identical worldwide.</p>
+</section>
+
+<div @key="Region">
+    @foreach (var (ids, title, intro) in Groups)
+    {
+        <h2>@title</h2>
+        if (intro is not null) { <p class="muted">@intro</p> }
+        <div class="mark-grid">
+            @foreach (var m in ids.Select(id => _marks.First(x => x.Id == id)))
+            {
+                <article class="mark-card">
+                    <header class="mark-head">
+                        <div class="mark-pic"><BuoyView MarkId="@m.Id" Height="150" /></div>
+                        <div class="mark-title">
+                            <h3>@m.Name</h3>
+                            <p class="muted">@m.Notes</p>
+                        </div>
+                    </header>
+                    <dl class="mark-facts">
+                        <dt>Colours</dt><dd>@m.Colours</dd>
+                        <dt>Topmark</dt>
+                        <dd class="with-pic">
+                            @if (m.Top != TopmarkKind.None) { <BuoyView MarkId="@m.Id" TopmarkOnly="true" Height="44" /> }
+                            <span>@m.TopmarkName</span>
+                        </dd>
+                        <dt>Light</dt>
+                        <dd>
+                            <div class="with-pic">
+                                @if (m.LightKey is not null) { <LightView SpecKey="@m.LightKey" Class="small" /> }
+                                <span><code>@m.LightAbbr</code><br /><span class="muted">@m.LightNote</span></span>
+                            </div>
+                            @if (Lights.Find(m.LightKey) is { } ls) { <LightTimeline Spec="@ls" Compact="true" /> }
+                        </dd>
+                        <dt>Passing</dt><dd>@m.Passing</dd>
+                    </dl>
+                </article>
+            }
+        </div>
+    }
+</div>
+
+<section class="panel">
+    <h2>Region A and B side by side</h2>
+    <p class="muted">The colour of the <em>side</em> of the channel is swapped. The shapes never change: port-hand marks are cylindrical (can), starboard-hand marks are conical.</p>
+    <div class="ab-grid">
+        @foreach (var id in new[] { "port", "starboard" })
+        {
+            <div class="ab-cell">
+                <BuoyView MarkId="@id" Height="120" RegionOverride="@MaritimeTrainer.Models.Region.A" />
+                <strong>Region A</strong>
+                <span>@(id == "port" ? "Port: red can" : "Starboard: green cone")</span>
+            </div>
+        }
+        @foreach (var id in new[] { "port", "starboard" })
+        {
+            <div class="ab-cell">
+                <BuoyView MarkId="@id" Height="120" RegionOverride="@MaritimeTrainer.Models.Region.B" />
+                <strong>Region B</strong>
+                <span>@(id == "port" ? "Port: green can" : "Starboard: red cone")</span>
+            </div>
+        }
+    </div>
+</section>
+
+<section class="panel tip">
+    <h2>Memory aids</h2>
+    <ul>
+        <li><strong>Direction of buoyage</strong> – towards a harbour from seaward, or clockwise around a landmass or the continent, as shown on the chart.</li>
+        <li><strong>Region A:</strong> “red to port when returning”. <strong>Region B:</strong> “red, right, returning”.</li>
+        <li><strong>Cardinal topmarks:</strong> North – both cones up; South – both down; East – base to base (an egg); West – point to point (a wine glass).</li>
+        <li><strong>Cardinal colours:</strong> the black sits where the cones point – N top, S bottom, E top and bottom, W in the middle.</li>
+        <li><strong>Cardinal lights (clock face):</strong> E = 3 flashes, S = 6 + a long flash, W = 9 flashes, N = continuous.</li>
+        <li><strong>Lateral lights</strong> may flash any rhythm except composite group flashing Fl(2+1), which is reserved for preferred-channel marks.</li>
+        <li><strong>White cardinal / isolated danger / safe water rhythms</strong> are kept free of yellow special-mark lights so they cannot be confused.</li>
+    </ul>
+</section>
+
+@code {
+    private List<MarkSpec> _marks = [];
+
+    private static readonly (string[] Ids, string Title, string? Intro)[] Groups =
+    [
+        (["port", "starboard", "prefstbd", "prefport"], "Lateral marks", "The sides of a channel, seen in the direction of buoyage."),
+        (["safe", "isolated"], "Safe water (mid-channel) and isolated danger",
+            "Safe water marks sit in the middle of a channel or at a landfall – navigable water on all sides. Isolated danger marks sit on a small danger with water all round."),
+        (["north", "east", "south", "west"], "Cardinal marks", "Named after the side of the danger on which the safe water lies."),
+        (["special", "wreck"], "Special and emergency wreck marks", null),
+    ];
+
+    private Region Region => Settings.Current.Region;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Settings.EnsureLoadedAsync();
+        Rebuild();
+    }
+
+    private void Rebuild() => _marks = Marks.Build(Settings.Current.Region);
+
+    private async Task SetRegionAsync(Region r)
+    {
+        Settings.Current.Region = r;
+        await Settings.SaveAsync();
+        Rebuild();
+    }
+}

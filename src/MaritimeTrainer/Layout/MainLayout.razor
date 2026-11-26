@@ -1,0 +1,31 @@
+@inherits LayoutComponentBase
+@inject SettingsService Settings
+
+<div class="shell">
+    <header class="topbar">
+        <NavLink href="" class="brand" Match="NavLinkMatch.All">
+            <span class="brand-mark">⚓</span>
+            <span class="brand-text">Maritime Trainer</span>
+        </NavLink>
+        <nav class="topnav" aria-label="Main">
+            <NavLink href="signals">Signals</NavLink>
+            <NavLink href="buoyage">Buoyage</NavLink>
+            <NavLink href="lights">Lights</NavLink>
+            <NavLink href="sectors">Sectors</NavLink>
+            <NavLink href="spell">Spell</NavLink>
+            <NavLink href="progress">Progress</NavLink>
+            <NavLink href="settings">Settings</NavLink>
+        </nav>
+    </header>
+    <main class="content">
+        @Body
+    </main>
+    <footer class="footer">
+        Training aid only – always refer to current official publications (ICS Pub. 102, IALA R1001, your chart and Admiralty List of Lights).
+        <div class="build">@BuildInfo.Display · <a href="https://github.com/kreaton/MaritimeTrainer">GitHub</a></div>
+    </footer>
+</div>
+
+@code {
+    protected override async Task OnInitializedAsync() => await Settings.EnsureLoadedAsync();
+}

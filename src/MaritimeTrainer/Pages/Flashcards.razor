@@ -1,0 +1,197 @@
+@page "/flashcards/{DeckId}"
+@implements IAsyncDisposable
+@inject ProgressService Progress
+@inject SettingsService Settings
+@inject IJSRuntime JS
+
+<PageTitle>Flashcards – @(_deck?.Title)</PageTitle>
+
+@if (_deck is null)
+{
+    <h1>Flashcards</h1>
+    <p>Unknown deck. <a href="">Back to the harbour</a>.</p>
+}
+else
+{
+    <h1>@_deck.Icon Flashcards</h1>
+    <p class="lead">@_deck.Title</p>
+
+    <section class="panel">
+        <div class="row gap wrap">
+            <label class="field">
+                <span>Front of the card</span>
+                <select @onchange="e => SetFrontAsync(e.Value?.ToString())">
+                    @foreach (var r in _deck.Reps)
+                    {
+                        <option value="@r" selected="@(r == _front)">@RepInfo.Title(r)</option>
+                    }
+                </select>
+            </label>
+            <label class="field">
+                <span>Items</span>
+                <select @onchange="e => SetPoolAsync(e.Value?.ToString())">
+                    @foreach (var (id, title) in _deck.Pools)
+                    {
+                        <option value="@id" selected="@(id == _pool)">@title</option>
+                    }
+                    <option value="weak" selected="@(_pool == "weak")">My weak spots</option>
+                </select>
+            </label>
+        </div>
+    </section>
+
+    @if (_item is null)
+    {
+        <p class="notice">No cards match – choose a different front or item set.</p>
+    }
+    else
+    {
+        <div class="hud">
+            <span class="hud-item">Cards <strong>@_seen</strong></span>
+            <span class="hud-item">Got it <strong>@_known</strong></span>
+            <span class="hud-item">Again <strong>@_again</strong></span>
+        </div>
+
+        <div class="flashcard @(_flipped ? "flipped" : "")" role="button" tabindex="0" @onclick="Flip" @onkeydown="CardKey" @key="_seen">
+            @if (!_flipped)
+            {
+                <div class="fc-front">
+                    <div class="q-kind">@RepInfo.Title(_front)</div>
+                    <RepView Rep="@_front" Value="@_item[_front]" AutoPlay="@Settings.Current.AutoPlay" />
+                    <div class="muted tap">Tap to reveal</div>
+                </div>
+            }
+            else
+            {
+                <div class="fc-back">
+                    <ItemCard Item="@_item" />
+                </div>
+            }
+        </div>
+
+        @if (_flipped)
+        {
+            <div class="row gap center">
+                <button type="button" class="btn danger" @onclick="() => GradeAsync(false)">🔁 Again <small>(1)</small></button>
+                <button type="button" class="btn primary" @onclick="() => GradeAsync(true)">✓ Got it <small>(2)</small></button>
+            </div>
+        }
+        else
+        {
+            <div class="row gap center">
+                <button type="button" class="btn" @onclick="Flip">Reveal <small>(space)</small></button>
+            </div>
+        }
+    }
+}
+
+@code {
+    [Parameter] public string DeckId { get; set; } = "";
+
+    private DeckInfo? _deck;
+    private string? _loadedDeck;
+    private Rep _front;
+    private string _pool = "all";
+    private QuizEngine? _engine;
+    private QuizItem? _item;
+    private bool _flipped;
+    private int _seen, _known, _again;
+    private DotNetObjectReference<Flashcards>? _ref;
+    private bool _keysRegistered;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedDeck == DeckId) return;
+        _loadedDeck = DeckId;
+        _deck = Decks.Find(DeckId);
+        await Progress.EnsureLoadedAsync();
+        await Settings.EnsureLoadedAsync();
+        if (_deck is not null)
+        {
+            _front = _deck.Reps[0];
+            _seen = _known = _again = 0;
+            Rebuild();
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_keysRegistered) return;
+        _keysRegistered = true;
+        _ref = DotNetObjectReference.Create(this);
+        try { await JS.InvokeVoidAsync("trainer.registerKeys", _ref); } catch { }
+    }
+
+    private Task SetFrontAsync(string? v)
+    {
+        if (Enum.TryParse<Rep>(v, out var r)) _front = r;
+        Rebuild();
+        return Task.CompletedTask;
+    }
+
+    private Task SetPoolAsync(string? v)
+    {
+        _pool = v ?? "all";
+        Rebuild();
+        return Task.CompletedTask;
+    }
+
+    private void Rebuild()
+    {
+        if (_deck is null) return;
+        var items = Decks.Items(_deck.Id, _pool == "weak" ? "all" : _pool, Settings.Current.Region);
+        if (_pool == "weak")
+        {
+            var weak = items.Where(i => { var s = Progress.Get(i.Id); return s.Attempts > 0 && (s.Accuracy < 0.8 || s.Streak < 2); }).ToList();
+            if (weak.Count > 0) items = weak;
+        }
+        items = items.Where(i => i.Has(_front)).ToList();
+        _engine = new QuizEngine(items, Progress);
+        _flipped = false;
+        _item = _engine.PickWeighted(items);
+        _seen = _item is null ? _seen : _seen + 1;
+    }
+
+    private void Flip()
+    {
+        if (_item is not null) _flipped = !_flipped;
+    }
+
+    private async Task GradeAsync(bool known)
+    {
+        if (_item is null || _engine is null) return;
+        if (known) _known++; else _again++;
+        await Progress.RecordAsync(_item.Id, known);
+        _flipped = false;
+        _item = _engine.PickWeighted(_engine.Items, _item.Id);
+        _seen++;
+        try { await JS.InvokeVoidAsync("trainer.blur"); } catch { }
+    }
+
+    private void CardKey(KeyboardEventArgs e)
+    {
+        if (e.Key is "Enter" or " ") Flip();
+    }
+
+    [JSInvokable]
+    public async Task OnKey(string key)
+    {
+        if (_item is null) return;
+        if (!_flipped)
+        {
+            if (key is " " or "Enter" or "ArrowRight") Flip();
+        }
+        else
+        {
+            if (key is "1" or "x" or "ArrowLeft") await GradeAsync(false);
+            else if (key is "2" or "Enter" or " " or "ArrowRight") await GradeAsync(true);
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try { await JS.InvokeVoidAsync("trainer.unregisterKeys"); } catch { }
+        _ref?.Dispose();
+    }
+}

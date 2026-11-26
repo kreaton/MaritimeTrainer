@@ -1,0 +1,559 @@
+@page "/quiz/{DeckId}"
+@implements IAsyncDisposable
+@inject ProgressService Progress
+@inject SettingsService Settings
+@inject AudioService Audio
+@inject IJSRuntime JS
+
+<PageTitle>Quiz – @(_deck?.Title)</PageTitle>
+
+@if (_deck is null)
+{
+    <h1>Quiz</h1>
+    <p>Unknown quiz. <a href="">Back to the harbour</a>.</p>
+}
+else if (_phase == Phase.Setup)
+{
+    <h1>@_deck.Icon @_deck.Title</h1>
+    <p class="lead">Choose what you are shown and how you want to answer.</p>
+
+    <section class="panel">
+        <h2>1. What do you want to practise?</h2>
+        <div class="chips">
+            @foreach (var p in _deck.Presets)
+            {
+                var preset = p;
+                <button type="button" class="chip @(IsPreset(preset) ? "active" : "")" @onclick="() => ApplyPreset(preset)">@preset.Title</button>
+            }
+        </div>
+        @if (!_mixed)
+        {
+            <div class="row gap">
+                <label class="field">
+                    <span>You are shown</span>
+                    <select @onchange="e => SetFrom(e.Value?.ToString())">
+                        @foreach (var r in _deck.Reps)
+                        {
+                            <option value="@r" selected="@(r == _from)">@RepInfo.Title(r)</option>
+                        }
+                    </select>
+                </label>
+                <span class="arrow">→</span>
+                <label class="field">
+                    <span>You answer with</span>
+                    <select @onchange="e => SetTo(e.Value?.ToString())">
+                        @foreach (var r in _deck.Reps)
+                        {
+                            <option value="@r" selected="@(r == _to)">@RepInfo.Title(r)</option>
+                        }
+                    </select>
+                </label>
+            </div>
+        }
+        else
+        {
+            <p class="muted">Every direction this set supports, shuffled – a good final test.</p>
+        }
+    </section>
+
+    <section class="panel">
+        <h2>2. Which items?</h2>
+        <div class="chips">
+            @foreach (var (id, title) in _deck.Pools)
+            {
+                var pid = id;
+                <button type="button" class="chip @(_pool == pid ? "active" : "")" @onclick="() => _pool = pid">@title</button>
+            }
+            <button type="button" class="chip @(_pool == "weak" ? "active" : "")" @onclick='() => _pool = "weak"'>My weak spots</button>
+        </div>
+        @if (_deck.Id == "buoys")
+        {
+            <p class="muted">Lateral marks use <strong>IALA Region @Settings.Current.Region</strong> colours (change in <a href="settings">Settings</a>).</p>
+        }
+    </section>
+
+    <section class="panel">
+        <h2>3. How do you want to play?</h2>
+        <div class="chips">
+            <button type="button" class="chip @(_end == EndMode.Count10 ? "active" : "")" @onclick="() => _end = EndMode.Count10">10 questions</button>
+            <button type="button" class="chip @(_end == EndMode.Count25 ? "active" : "")" @onclick="() => _end = EndMode.Count25">25 questions</button>
+            <button type="button" class="chip @(_end == EndMode.Sprint ? "active" : "")" @onclick="() => _end = EndMode.Sprint">⏱ 60-second sprint</button>
+            <button type="button" class="chip @(_end == EndMode.Survival ? "active" : "")" @onclick="() => _end = EndMode.Survival">❤ Survival (3 lives)</button>
+        </div>
+        <div class="chips">
+            <button type="button" class="chip @(_mode == AnswerMode.Choice ? "active" : "")" @onclick="() => _mode = AnswerMode.Choice">Pick from choices</button>
+            <button type="button" class="chip @(_mode == AnswerMode.Typed ? "active" : "")" @onclick="() => _mode = AnswerMode.Typed">Type / key it in</button>
+        </div>
+        @if (_mode == AnswerMode.Typed)
+        {
+            <p class="muted">
+                Typing works when the answer is a letter, a phonetic word or Morse (use the dit / dah keys).
+                Other answers fall back to choices.
+            </p>
+        }
+    </section>
+
+    @if (_message is not null)
+    {
+        <p class="notice">@_message</p>
+    }
+    <button type="button" class="btn primary big" @onclick="StartAsync">Start</button>
+}
+else if (_phase == Phase.Play && _q is not null)
+{
+    <div class="hud">
+        <span class="hud-item">Score <strong>@_score</strong></span>
+        <span class="hud-item">🔥 <strong>@_streak</strong></span>
+        @switch (_end)
+        {
+            case EndMode.Sprint:
+                <span class="hud-item time @(_timeLeft <= 10 ? "low" : "")">⏱ <strong>@((int)Math.Ceiling(_timeLeft))s</strong></span>
+                break;
+            case EndMode.Survival:
+                <span class="hud-item lives" aria-label="@_lives lives left">@string.Concat(Enumerable.Repeat("❤", Math.Max(_lives, 0)))@string.Concat(Enumerable.Repeat("🖤", 3 - Math.Max(_lives, 0)))</span>
+                break;
+            default:
+                <span class="hud-item">@(_answeredCount + (_answered ? 0 : 1)) / @Limit</span>
+                break;
+        }
+        <button type="button" class="link" @onclick="FinishAsync">End</button>
+    </div>
+
+    <section class="qcard" aria-live="polite">
+        <div class="q-kind">@RepInfo.Short(_q.Prompt) → @RepInfo.Short(_q.Answer)</div>
+        <div class="q-hint">@RepInfo.PromptHint(_q.Prompt, _q.Answer)</div>
+        <div class="q-prompt" @key="_seq">
+            <RepView Rep="@_q.Prompt" Value="@_q.Item[_q.Prompt]" AutoPlay="@Settings.Current.AutoPlay" />
+        </div>
+    </section>
+
+    @if (!_q.Typed)
+    {
+        <div class="choices @(RepInfo.IsVisual(_q.Answer) ? "visual" : "textual")" @key="_seq">
+            @for (var i = 0; i < _q.Choices.Count; i++)
+            {
+                var idx = i;
+                var choice = _q.Choices[i];
+                <div class="choice @ChoiceClass(idx)" role="button" tabindex="0"
+                     @onclick="() => ChooseAsync(idx)"
+                     @onkeydown="e => ChoiceKey(e, idx)">
+                    <span class="choice-key">@(idx + 1)</span>
+                    <div class="choice-body"><RepView Rep="@_q.Answer" Value="@choice[_q.Answer]" Compact="true" /></div>
+                </div>
+            }
+        </div>
+        @if (!_answered)
+        {
+            <button type="button" class="link dont-know" @onclick="DontKnowAsync">I don't know</button>
+        }
+    }
+    else if (RepInfo.IsMorse(_q.Answer))
+    {
+        <section class="keyer">
+            <div class="keyer-display" aria-live="polite">
+                @if (_keyed.Length == 0) { <span class="muted">Key the Morse code…</span> }
+                else { <MorseView Code="@_keyed" Class="large" /> }
+            </div>
+            <div class="keyer-keys">
+                <button type="button" class="key dit-key" disabled="@_answered" @onclick="() => KeyAsync('.')">• dit<small>.</small></button>
+                <button type="button" class="key dah-key" disabled="@_answered" @onclick="() => KeyAsync('-')">– dah<small>-</small></button>
+                <button type="button" class="key" disabled="@_answered" @onclick="Backspace" aria-label="Delete last">⌫</button>
+            </div>
+            <button type="button" class="btn primary" disabled="@(_answered || _keyed.Length == 0)" @onclick="SubmitTypedAsync">Check</button>
+            @if (!_answered) { <button type="button" class="link dont-know" @onclick="DontKnowAsync">I don't know</button> }
+        </section>
+    }
+    else
+    {
+        <section class="typed-box">
+            <input id="typed-answer" class="typed" type="text" autocomplete="off" autocapitalize="off" spellcheck="false"
+                   placeholder="@(_q.Answer == Rep.Phonetic ? "Type the phonetic word…" : "Type the letter or number…")"
+                   disabled="@_answered" @bind="_typed" @bind:event="oninput" @onkeydown="TypedKeyAsync" />
+            <button type="button" class="btn primary" disabled="@(_answered || string.IsNullOrWhiteSpace(_typed))" @onclick="SubmitTypedAsync">Check</button>
+            @if (!_answered) { <button type="button" class="link dont-know" @onclick="DontKnowAsync">I don't know</button> }
+        </section>
+    }
+
+    @if (_answered)
+    {
+        <section class="feedback @(_correct ? "good" : "bad")">
+            <div class="fb-head">
+                <strong>@(_correct ? "Correct!" : "Not quite")</strong>
+                @if (_end != EndMode.Sprint)
+                {
+                    <button type="button" class="btn primary" @onclick="AdvanceAsync">@(ShouldFinish ? "See results" : "Next ▸")</button>
+                }
+            </div>
+            <ItemCard Item="@_q.Item" Compact="true" />
+        </section>
+    }
+}
+else
+{
+    <h1>Results</h1>
+    <section class="panel results">
+        <div class="big-number">@_score</div>
+        <p class="lead">points</p>
+        <div class="stats">
+            <div><strong>@_correctCount / @_answeredCount</strong><span>correct</span></div>
+            <div><strong>@(_answeredCount == 0 ? 0 : (int)Math.Round(100.0 * _correctCount / _answeredCount))%</strong><span>accuracy</span></div>
+            <div><strong>@_best</strong><span>best streak</span></div>
+        </div>
+    </section>
+
+    @if (_missed.Count > 0)
+    {
+        <h2>Review these</h2>
+        <div class="card-list">
+            @foreach (var m in _missed)
+            {
+                <ItemCard Item="@m" Compact="true" />
+            }
+        </div>
+    }
+    else if (_answeredCount > 0)
+    {
+        <p class="notice good">Flawless – nothing to review.</p>
+    }
+
+    <div class="row gap wrap">
+        <button type="button" class="btn primary" @onclick="StartAsync">Play again</button>
+        <button type="button" class="btn" @onclick="BackToSetup">Change settings</button>
+        <a class="btn" href="@_deck.StudyPath">Study</a>
+        <a class="btn" href="flashcards/@_deck.Id">Flashcards</a>
+    </div>
+}
+
+@code {
+    private enum Phase { Setup, Play, Done }
+    private enum EndMode { Count10, Count25, Sprint, Survival }
+    private enum AnswerMode { Choice, Typed }
+
+    [Parameter] public string DeckId { get; set; } = "";
+
+    private DeckInfo? _deck;
+    private string? _loadedDeck;
+    private Phase _phase = Phase.Setup;
+
+    // setup
+    private Rep? _from, _to;
+    private bool _mixed;
+    private string _pool = "all";
+    private EndMode _end = EndMode.Count10;
+    private AnswerMode _mode = AnswerMode.Choice;
+    private string? _message;
+
+    // play
+    private QuizEngine? _engine;
+    private Question? _q;
+    private int _seq;
+    private int _picked = -1;
+    private string _typed = "";
+    private string _keyed = "";
+    private bool _answered, _correct, _needFocus;
+    private int _score, _answeredCount, _correctCount, _streak, _best, _lives;
+    private double _timeLeft;
+    private DateTime _endsAt;
+    private readonly List<QuizItem> _missed = [];
+    private Timer? _timer;
+    private DotNetObjectReference<Quiz>? _ref;
+    private bool _keysRegistered;
+
+    private int Limit => _end switch { EndMode.Count10 => 10, EndMode.Count25 => 25, _ => int.MaxValue };
+    private bool ShouldFinish => _end switch
+    {
+        EndMode.Count10 or EndMode.Count25 => _answeredCount >= Limit,
+        EndMode.Survival => _lives <= 0,
+        _ => false,
+    };
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedDeck == DeckId) return;
+        _loadedDeck = DeckId;
+        _deck = Decks.Find(DeckId);
+        await StopTimerAsync();
+        _phase = Phase.Setup;
+        _pool = "all";
+        _message = null;
+        if (_deck is not null)
+        {
+            var first = _deck.Presets[0];
+            ApplyPreset(first);
+        }
+        await Progress.EnsureLoadedAsync();
+        await Settings.EnsureLoadedAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_keysRegistered)
+        {
+            _keysRegistered = true;
+            _ref = DotNetObjectReference.Create(this);
+            try { await JS.InvokeVoidAsync("trainer.registerKeys", _ref); } catch { }
+        }
+        if (_needFocus)
+        {
+            _needFocus = false;
+            try { await JS.InvokeVoidAsync("trainer.focusById", "typed-answer"); } catch { }
+        }
+    }
+
+    // ------------------------------------------------------------ setup helpers
+
+    private bool IsPreset(Preset p) => p.From is null ? _mixed : !_mixed && p.From == _from && p.To == _to;
+
+    private void ApplyPreset(Preset p)
+    {
+        _message = null;
+        if (p.From is null) { _mixed = true; return; }
+        _mixed = false;
+        _from = p.From;
+        _to = p.To;
+    }
+
+    private void SetFrom(string? v)
+    {
+        if (Enum.TryParse<Rep>(v, out var r)) _from = r;
+        if (_from == _to) _to = _deck!.Reps.First(x => x != _from);
+    }
+
+    private void SetTo(string? v)
+    {
+        if (Enum.TryParse<Rep>(v, out var r)) _to = r;
+        if (_from == _to) _from = _deck!.Reps.First(x => x != _to);
+    }
+
+    // ------------------------------------------------------------ game flow
+
+    // Typed answers only make sense when the answer is a letter, phonetic word or Morse; otherwise fall back to choices.
+    private bool EffectiveTyped => _mode == AnswerMode.Typed
+        && (_mixed ? _deck!.Reps.Any(RepInfo.IsTypable) : _to is Rep t && RepInfo.IsTypable(t));
+
+    private async Task StartAsync()
+    {
+        if (_deck is null) return;
+        _message = null;
+        await Progress.EnsureLoadedAsync();
+        await Settings.EnsureLoadedAsync();
+
+        var items = Decks.Items(_deck.Id, _pool == "weak" ? "all" : _pool, Settings.Current.Region);
+        if (_pool == "weak")
+        {
+            var weak = items.Where(i =>
+            {
+                var s = Progress.Get(i.Id);
+                return s.Attempts > 0 && (s.Accuracy < 0.8 || s.Streak < 2);
+            }).ToList();
+            if (weak.Count >= 3) items = weak;
+            else _message = "Not enough weak spots recorded yet – using every item for now.";
+        }
+
+        _engine = new QuizEngine(items, Progress);
+        var first = _engine.Next(_deck.Reps, _mixed ? null : _from, _mixed ? null : _to, EffectiveTyped);
+        if (first is null)
+        {
+            _phase = Phase.Setup;
+            _message = "No questions are possible for that combination (for example, numbers have no single-flag meaning). Choose something else.";
+            return;
+        }
+
+        _score = _answeredCount = _correctCount = _streak = _best = 0;
+        _lives = 3;
+        _missed.Clear();
+        _phase = Phase.Play;
+        SetQuestion(first);
+
+        await StopTimerAsync();
+        if (_end == EndMode.Sprint)
+        {
+            _endsAt = DateTime.UtcNow.AddSeconds(60);
+            _timeLeft = 60;
+            _timer = new Timer(_ => _ = InvokeAsync(TickAsync), null, 250, 250);
+        }
+    }
+
+    private void SetQuestion(Question q)
+    {
+        _q = q;
+        _seq++;
+        _picked = -1;
+        _typed = "";
+        _keyed = "";
+        _answered = false;
+        _correct = false;
+        _needFocus = q.Typed && !RepInfo.IsMorse(q.Answer);
+    }
+
+    private async Task TickAsync()
+    {
+        if (_phase != Phase.Play) return;
+        _timeLeft = Math.Max(0, (_endsAt - DateTime.UtcNow).TotalSeconds);
+        if (_timeLeft <= 0) await FinishAsync();
+        else StateHasChanged();
+    }
+
+    private async Task ChooseAsync(int idx)
+    {
+        if (_answered || _q is null || _q.Typed) return;
+        _picked = idx;
+        await ResolveAsync(idx == _q.CorrectIndex);
+    }
+
+    private Task DontKnowAsync() => _answered || _q is null ? Task.CompletedTask : ResolveAsync(false);
+
+    private async Task SubmitTypedAsync()
+    {
+        if (_answered || _q is null || !_q.Typed) return;
+        var input = RepInfo.IsMorse(_q.Answer) ? _keyed : _typed;
+        if (string.IsNullOrWhiteSpace(input)) return;
+        await ResolveAsync(QuizEngine.Verify(_q, input));
+    }
+
+    private async Task ResolveAsync(bool correct)
+    {
+        if (_q is null || _answered) return;
+        _answered = true;
+        _correct = correct;
+        _answeredCount++;
+        if (correct)
+        {
+            _correctCount++;
+            _streak++;
+            _best = Math.Max(_best, _streak);
+            _score += 10 + Math.Min(_streak, 10);
+        }
+        else
+        {
+            _streak = 0;
+            _lives--;
+            if (!_missed.Any(m => m.Id == _q.Item.Id)) _missed.Add(_q.Item);
+        }
+
+        var seq = _seq;
+        await Progress.RecordAsync(_q.Item.Id, correct);
+        await Audio.ChimeAsync(correct);
+        try { await JS.InvokeVoidAsync("trainer.blur"); } catch { }
+
+        if (_end == EndMode.Sprint) _ = AutoAdvanceAsync(seq);
+    }
+
+    private async Task AutoAdvanceAsync(int seq)
+    {
+        await Task.Delay(_correct ? 650 : 1500);
+        if (_phase == Phase.Play && seq == _seq && _answered)
+        {
+            await AdvanceAsync();
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task AdvanceAsync()
+    {
+        if (!_answered || _engine is null || _deck is null) return;
+        if (ShouldFinish) { await FinishAsync(); return; }
+        var next = _engine.Next(_deck.Reps, _mixed ? null : _from, _mixed ? null : _to, EffectiveTyped, _q?.Item.Id);
+        if (next is null) { await FinishAsync(); return; }
+        SetQuestion(next);
+    }
+
+    private async Task FinishAsync()
+    {
+        await StopTimerAsync();
+        _phase = Phase.Done;
+        await Audio.StopAsync();
+        StateHasChanged();
+    }
+
+    private void BackToSetup() => _phase = Phase.Setup;
+
+    private async Task StopTimerAsync()
+    {
+        if (_timer is not null)
+        {
+            await _timer.DisposeAsync();
+            _timer = null;
+        }
+    }
+
+    // ------------------------------------------------------------ input
+
+    private string ChoiceClass(int idx)
+    {
+        if (!_answered || _q is null) return "";
+        if (idx == _q.CorrectIndex) return "right";
+        if (idx == _picked) return "wrong";
+        return "dim";
+    }
+
+    private async Task ChoiceKey(KeyboardEventArgs e, int idx)
+    {
+        if (e.Key is "Enter" or " ") await ChooseAsync(idx);
+    }
+
+    private async Task TypedKeyAsync(KeyboardEventArgs e)
+    {
+        if (e.Key != "Enter") return;
+        if (_answered) await AdvanceAsync();
+        else await SubmitTypedAsync();
+    }
+
+    private async Task KeyAsync(char c)
+    {
+        if (_answered || _keyed.Length >= 14) return;
+        _keyed += c;
+        await Audio.BeepAsync(c == '-');
+    }
+
+    private void Backspace()
+    {
+        if (!_answered && _keyed.Length > 0) _keyed = _keyed[..^1];
+    }
+
+    /// <summary>Called from JavaScript for keys pressed anywhere on the page (see trainer.registerKeys).</summary>
+    [JSInvokable]
+    public async Task OnKey(string key)
+    {
+        if (_phase != Phase.Play || _q is null)
+        {
+            if (_phase == Phase.Setup && key == "Enter" && _deck is not null) await StartAsync();
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        if (_answered)
+        {
+            if (key is "Enter" or " " or "ArrowRight" && _end != EndMode.Sprint) await AdvanceAsync();
+        }
+        else if (!_q.Typed)
+        {
+            if (key.Length == 1 && char.IsDigit(key[0]))
+            {
+                var n = key[0] - '1';
+                if (n >= 0 && n < _q.Choices.Count) await ChooseAsync(n);
+            }
+        }
+        else if (RepInfo.IsMorse(_q.Answer))
+        {
+            switch (key)
+            {
+                case "." or "j": await KeyAsync('.'); break;
+                case "-" or "k": await KeyAsync('-'); break;
+                case "Backspace": Backspace(); break;
+                case "Enter": await SubmitTypedAsync(); break;
+            }
+        }
+
+        if (key is "r" && _q.Prompt == Rep.MorseAudio) await Audio.PlayMorseAsync(_q.Item[Rep.MorseAudio]);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await StopTimerAsync();
+        try { await JS.InvokeVoidAsync("trainer.unregisterKeys"); } catch { }
+        _ref?.Dispose();
+        try { await Audio.StopAsync(); } catch { }
+    }
+}

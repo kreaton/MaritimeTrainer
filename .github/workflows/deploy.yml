@@ -1,0 +1,62 @@
+name: Build and Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch: # Also allows a manual run from the Actions tab
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x # The projects target net10.0
+
+      - name: Test model logic
+        # The test runner's exit code is the number of failed checks
+        run: dotnet run --project tests/MaritimeTrainer.Tests -c Release
+
+      - name: Publish .NET App
+        # The run number becomes the patch version (1.0.<run>), see Directory.Build.props
+        run: dotnet publish src/MaritimeTrainer/MaritimeTrainer.csproj -c Release -o release -p:BuildNumber=${{ github.run_number }}
+
+      - name: Prepare for GitHub Pages
+        run: |
+          cd release/wwwroot
+          # The site is served from /<repo>/, not the domain root.
+          sed -i 's#<base href="/" />#<base href="/${{ github.event.repository.name }}/" />#' index.html
+          # SPA fallback for deep links, and stop Jekyll from hiding _framework.
+          cp index.html 404.html
+          touch .nojekyll
+          # Pages can't serve the precompressed copies, so leave them out
+          find . -type f \( -name '*.br' -o -name '*.gz' \) -delete
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: release/wwwroot
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

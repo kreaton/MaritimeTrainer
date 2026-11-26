@@ -1,0 +1,16 @@
+{
+  "name": "Maritime Trainer",
+  "short_name": "Maritime",
+  "description": "Signal flags, Morse, the phonetic alphabet, IALA buoyage and lights.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0a1f33",
+  "theme_color": "#0b2239",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

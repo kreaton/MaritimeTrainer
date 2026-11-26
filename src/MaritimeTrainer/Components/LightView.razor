@@ -1,0 +1,44 @@
+@implements IDisposable
+@inject IJSRuntime JS
+
+<span class="lamp @Class" role="img" aria-label="@_label" @ref="_el">
+    <span class="lamp-glow"></span>
+    <span class="lamp-core"></span>
+</span>
+
+@code {
+    private ElementReference _el;
+    private string? _started;
+    private string _label = "Light";
+    private LightSpec? _spec;
+
+    /// <summary>Key of a light in <see cref="Lights"/> (e.g. "Q3"). Ignored when <see cref="Spec"/> is set.</summary>
+    [Parameter] public string SpecKey { get; set; } = "";
+    /// <summary>A light built on the fly (e.g. typed in by the user).</summary>
+    [Parameter] public LightSpec? Spec { get; set; }
+    [Parameter] public string? Class { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        _spec = Spec ?? Lights.Find(SpecKey);
+        _label = _spec is null ? "Light" : $"Animated light, {_spec.Name}";
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_spec is null) return;
+        var signature = LightTimeline.Signature(_spec);
+        if (_started == signature) return;
+        _started = signature;
+        var durs = _spec.Cycle.Select(s => s.Seconds).ToArray();
+        var cols = _spec.Cycle.Select(s => s.Colour ?? "").ToArray();
+        var levels = _spec.Cycle.Select(s => s.Level).ToArray();
+        try { await JS.InvokeVoidAsync("trainer.startLight", _el, durs, cols, levels); }
+        catch { /* animation is a nicety */ }
+    }
+
+    public void Dispose()
+    {
+        try { _ = JS.InvokeVoidAsync("trainer.stopLight", _el); } catch { }
+    }
+}

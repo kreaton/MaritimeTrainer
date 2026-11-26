@@ -1,0 +1,61 @@
+@page "/spell"
+
+<PageTitle>Spell it</PageTitle>
+
+<h1>✍️ Spell it</h1>
+<p class="lead">Type a word or message to see it in flags, Morse and the phonetic alphabet.</p>
+
+<input class="typed" type="text" maxlength="40" autocomplete="off" autocapitalize="characters" spellcheck="false"
+       placeholder="e.g. MAYDAY or CAPE 42" @bind="_text" @bind:event="oninput" aria-label="Message" />
+
+@{
+    var words = _text.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+        .Select(w => w.Where(c => Morse.For(c) is not null).ToArray())
+        .Where(w => w.Length > 0)
+        .ToList();
+    var morse = Morse.Encode(_text);
+    var skipped = _text.Any(c => c != ' ' && Morse.For(c) is null);
+}
+
+@if (words.Count == 0)
+{
+    <p class="muted">Letters A–Z and digits 0–9 are supported.</p>
+}
+else
+{
+    <div class="row gap wrap spell-actions">
+        <MorseButton Code="@morse" Label="Play in Morse" Class="big" />
+    </div>
+    @if (skipped)
+    {
+        <p class="muted">Characters other than letters and digits are skipped.</p>
+    }
+
+    <div class="spell-words">
+        @foreach (var w in words)
+        {
+            <div class="spell-word">
+                @foreach (var c in w)
+                {
+                    var e = SignalData.Find(c)!;
+                    var cm = Morse.For(c)!;
+                    <div class="spell-cell">
+                        <FlagView Id="@e.Symbol" Height="72" />
+                        <span class="sig-sym small">@e.Symbol</span>
+                        <span class="sig-phon">@e.Phonetic</span>
+                        <MorseView Code="@cm" Class="compact" />
+                    </div>
+                }
+            </div>
+        }
+    </div>
+
+    <section class="panel">
+        <h2>Spoken</h2>
+        <p class="spoken">@string.Join(" · ", words.Select(w => string.Join(" ", w.Select(c => SignalData.Find(c)!.Phonetic))))</p>
+    </section>
+}
+
+@code {
+    private string _text = "MAYDAY";
+}

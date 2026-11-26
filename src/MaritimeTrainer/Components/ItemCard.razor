@@ -1,0 +1,50 @@
+@* Shows everything known about one item: used for flashcard backs, answer feedback and "study these" lists. *@
+<div class="item-card @(Compact ? "compact" : "")">
+    @if (_visuals.Count > 0)
+    {
+        <div class="ic-visuals">
+            @foreach (var r in _visuals)
+            {
+                <RepView Rep="@r" Value="@Item[r]" Compact="@Compact" />
+            }
+        </div>
+    }
+    <div class="ic-rows">
+        @foreach (var r in _rows)
+        {
+            <div class="ic-row">
+                <span class="ic-label">@RepInfo.Short(r)</span>
+                <span class="ic-value">
+                    <RepView Rep="@r" Value="@Item[r]" Compact="true" />
+                    @if (r == Rep.MorseVisual)
+                    {
+                        <MorseButton Code="@Item[r]" Class="small" />
+                    }
+                </span>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private List<Rep> _visuals = [];
+    private List<Rep> _rows = [];
+
+    [Parameter, EditorRequired] public QuizItem Item { get; set; } = default!;
+    [Parameter] public bool Compact { get; set; }
+
+    private static readonly Rep[] Order =
+    [
+        Rep.Flag, Rep.MarkImage, Rep.LightAnim, Rep.Topmark,
+        Rep.Symbol, Rep.Phonetic, Rep.MarkName, Rep.LightName, Rep.MorseVisual, Rep.MorseAudio,
+        Rep.LightAbbr, Rep.MarkColours, Rep.Meaning, Rep.MarkPassing, Rep.LightDesc,
+    ];
+
+    protected override void OnParametersSet()
+    {
+        var present = Order.Where(Item.Has).ToList();
+        // Flags and pictures go on top; the Morse sound button sits next to the dots and dashes instead.
+        _visuals = present.Where(RepInfo.IsVisual).ToList();
+        _rows = present.Except(_visuals).Where(r => r != Rep.MorseAudio || !Item.Has(Rep.MorseVisual)).ToList();
+    }
+}

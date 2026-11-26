@@ -1,0 +1,159 @@
+@page "/lights"
+@inject SettingsService Settings
+
+<PageTitle>Study – Light characteristics</PageTitle>
+
+<h1>💡 Light characteristics</h1>
+<div class="row gap wrap">
+    <a class="btn primary" href="quiz/lights">Quiz me</a>
+    <a class="btn" href="flashcards/lights">Flashcards</a>
+    <a class="btn" href="sectors">Sector lights</a>
+</div>
+
+<section class="panel custom-light">
+    <h2>Try your own light</h2>
+    <p class="muted">Type a light the way it is written on the chart or in the light list, e.g. <code>Fl(3) G 10s</code>. Height (<code>12m</code>) and range (<code>7M</code>) may be included.</p>
+    <input type="text" class="light-input" aria-label="Light characteristic"
+           placeholder="e.g. Q(6)+LFl W 15s" spellcheck="false" autocomplete="off"
+           @bind="_input" @bind:event="oninput" @bind:after="OnInputChangedAsync" />
+    <div class="chips examples">
+        @foreach (var ex in Examples)
+        {
+            <button type="button" class="chip" @onclick="() => UseExampleAsync(ex)">@ex</button>
+        }
+    </div>
+
+    @if (_error is not null)
+    {
+        <div class="notice">@_error</div>
+    }
+    else if (_parsed is not null && _spec is not null)
+    {
+        if (_parsed.IsSector)
+        {
+            <div class="row gap wrap sector-pick">
+                <span class="muted">Sector light – show the</span>
+                @foreach (var c in _parsed.Colours)
+                {
+                    var code = c;
+                    <button type="button" class="chip @(code == _sectorColour ? "active" : "")" @onclick="() => PickSector(code)">
+                        <span class="swatch" style="background:@LightParser.ColourHex(code)"></span>@LightParser.ColourName(code)
+                    </button>
+                }
+                <span class="muted">sector</span>
+            </div>
+        }
+        <div class="custom-out">
+            <LightView Spec="@_spec" Class="large" />
+            <div class="grow">
+                <div class="meaning-title"><strong>@_parsed.Name</strong> <code class="rep-abbr">@_parsed.Canonical</code></div>
+                <div>@_parsed.Description</div>
+                @foreach (var n in _parsed.Notes)
+                {
+                    <div class="muted small-note">ⓘ @n</div>
+                }
+            </div>
+        </div>
+        <LightTimeline Spec="@_spec" />
+        <p class="muted small-note">Charts give only the rhythm and the period; the length of each flash and gap here is a typical value.</p>
+    }
+</section>
+
+<section class="panel tip">
+    <h2>Reading a light on the chart</h2>
+    <p>
+        <code class="rep-abbr">Fl(2+1) G 10s 12m 7M</code>
+    </p>
+    <ul>
+        <li><strong>Fl(2+1)</strong> – the characteristic: composite group flashing, a group of two flashes then one</li>
+        <li><strong>G</strong> – the colour (W white, R red, G green, Y yellow, Bu blue)</li>
+        <li><strong>10s</strong> – the period: the time for one complete cycle</li>
+        <li><strong>12m</strong> – the height of the light above the datum (metres)</li>
+        <li><strong>7M</strong> – the nominal range in nautical miles</li>
+    </ul>
+    <p class="muted">Several colours such as <code>WRG</code> mean a sector light – the colour you see depends on your bearing from it.</p>
+</section>
+
+<h2>Characteristics</h2>
+<p class="muted">The band under each light shows its cycle over time: black is dark, white (or the light's colour) is lit. The marker moves in step with the lamp.</p>
+<div class="list">
+    @foreach (var s in Lights.All.Where(x => x.InCharacteristicsDeck))
+    {
+        <article class="meaning-row light-row">
+            <LightView SpecKey="@s.Key" Class="large" />
+            <div class="grow">
+                <div class="meaning-title"><strong>@s.Name</strong> <code class="rep-abbr">@s.Abbr</code></div>
+                <div>@s.Desc</div>
+                <LightTimeline Spec="@s" Compact="true" />
+            </div>
+        </article>
+    }
+</div>
+
+<section class="panel">
+    <h2>Colour codes</h2>
+    <div class="chips">
+        @foreach (var (abbr, colourName) in Lights.ColourCodes)
+        {
+            <span class="chip static"><strong>@abbr</strong> = @colourName</span>
+        }
+    </div>
+    <p class="muted">Flash rates: Quick (Q) 50–60 per minute, Very quick (VQ) 100–120 per minute, Ultra quick (UQ) 160 or more, Flashing (Fl) under 30, Long flashing (LFl) a flash of at least 2 seconds.</p>
+</section>
+
+@code {
+    private static readonly string[] Examples =
+    [
+        "Fl(3) G 10s", "Q(6)+LFl W 15s", "Oc(2+1) R 12s", "Mo(U) W 15s", "VQ(9) W 10s",
+        "LFl W 10s", "Iso WRG 4s", "Al.Fl WR 6s", "F Fl(2) W 10s", "IQ G 12s",
+    ];
+
+    private string _input = "";
+    private LightParser.Result? _parsed;
+    private LightSpec? _spec;
+    private string? _error;
+    private string? _sectorColour;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Settings.EnsureLoadedAsync();
+        _input = Settings.Current.CustomLight;
+        Parse();
+    }
+
+    private void Parse()
+    {
+        if (LightParser.TryParse(_input, out var r, out var err))
+        {
+            _parsed = r!;
+            _error = null;
+            if (_sectorColour is null || !_parsed.Colours.Contains(_sectorColour)) _sectorColour = _parsed.Colours[0];
+            _spec = _parsed.ToSpec(_sectorColour);
+        }
+        else
+        {
+            _error = err;
+            _parsed = null;
+            _spec = null;
+        }
+    }
+
+    private async Task OnInputChangedAsync()
+    {
+        Parse();
+        Settings.Current.CustomLight = _input;
+        await Settings.SaveAsync();
+    }
+
+    private Task UseExampleAsync(string ex)
+    {
+        _input = ex;
+        return OnInputChangedAsync();
+    }
+
+    private void PickSector(string code)
+    {
+        _sectorColour = code;
+        _spec = _parsed?.ToSpec(code);
+    }
+}

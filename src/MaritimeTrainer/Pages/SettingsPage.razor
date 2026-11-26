@@ -1,0 +1,68 @@
+@page "/settings"
+@inject SettingsService Settings
+@inject AudioService Audio
+
+<PageTitle>Settings</PageTitle>
+
+<h1>⚙️ Settings</h1>
+
+<section class="panel">
+    <h2>Morse sound</h2>
+
+    <label class="slider">
+        <span>Character speed <strong>@S.CharWpm WPM</strong></span>
+        <input type="range" min="5" max="30" @bind="S.CharWpm" @bind:event="oninput" @bind:after="SaveAsync" />
+    </label>
+    <label class="slider">
+        <span>Overall speed <strong>@S.EffWpm WPM</strong></span>
+        <input type="range" min="4" max="@S.CharWpm" @bind="S.EffWpm" @bind:event="oninput" @bind:after="SaveAsync" />
+    </label>
+    <p class="muted">
+        Each letter is played at the character speed. When the overall speed is lower, the <em>pauses</em> between letters and words are stretched
+        (Farnsworth timing) – the recommended way to learn Morse by ear. Set both the same for normal timing.
+    </p>
+
+    <label class="slider">
+        <span>Tone <strong>@S.ToneHz Hz</strong></span>
+        <input type="range" min="300" max="1200" step="10" @bind="S.ToneHz" @bind:event="oninput" @bind:after="SaveAsync" />
+    </label>
+    <label class="slider">
+        <span>Volume <strong>@((int)Math.Round(S.Volume * 100))%</strong></span>
+        <input type="range" min="0" max="1" step="0.05" @bind="S.Volume" @bind:event="oninput" @bind:after="SaveAsync" />
+    </label>
+
+    <div class="row gap wrap">
+        <MorseButton Code="@Morse.Encode("PARIS")" Label="Test: PARIS" />
+        <MorseButton Code="@Morse.Encode("CQ")" Label="Test: CQ" />
+        <MorseButton Code="@Morse.Encode("SOS")" Label="Test: SOS" />
+    </div>
+</section>
+
+<section class="panel">
+    <h2>Quizzes</h2>
+    <label class="check"><input type="checkbox" @bind="S.AutoPlay" @bind:after="SaveAsync" /> Play Morse automatically when a question appears</label>
+    <label class="check"><input type="checkbox" @bind="S.Effects" @bind:after="SaveAsync" /> Sound effects for right and wrong answers</label>
+</section>
+
+<section class="panel">
+    <h2>IALA buoyage region</h2>
+    <div class="chips">
+        <button type="button" class="chip @(S.Region == Region.A ? "active" : "")" @onclick="() => SetRegionAsync(Region.A)">Region A (red to port)</button>
+        <button type="button" class="chip @(S.Region == Region.B ? "active" : "")" @onclick="() => SetRegionAsync(Region.B)">Region B (red to starboard)</button>
+    </div>
+    <p class="muted">Region B covers the Americas, Japan, South Korea and the Philippines. Region A is everywhere else.</p>
+</section>
+
+@code {
+    private AppSettings S => Settings.Current;
+
+    protected override async Task OnInitializedAsync() => await Settings.EnsureLoadedAsync();
+
+    private async Task SaveAsync() => await Settings.SaveAsync();
+
+    private async Task SetRegionAsync(Region r)
+    {
+        S.Region = r;
+        await Settings.SaveAsync();
+    }
+}

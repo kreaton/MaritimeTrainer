@@ -1,0 +1,54 @@
+@using System.Globalization
+
+<svg class="sector-view" viewBox="0 0 260 260" role="img" aria-label="Sector light diagram">
+    <circle cx="130" cy="130" r="104" fill="#10233a" stroke="#38567a" stroke-width="1.5" />
+    @foreach (var s in Light.Sectors)
+    {
+        <path d="@Wedge(s)" fill="@SectorData.ColourHex(s.Colour)" fill-opacity=".92" stroke="#0b1a2b" stroke-width="1" />
+    }
+    @* compass ticks *@
+    @for (var b = 0; b < 360; b += 30)
+    {
+        var p1 = Pt(b, 104); var p2 = Pt(b, 110); var pl = Pt(b, 121);
+        <line x1="@F(p1.x)" y1="@F(p1.y)" x2="@F(p2.x)" y2="@F(p2.y)" stroke="#8fb0d4" stroke-width="1.5" />
+        @((MarkupString)$"<text x=\"{F(pl.x)}\" y=\"{F(pl.y + 3.5)}\" text-anchor=\"middle\" font-size=\"10\" fill=\"#9bb7d6\">{(b == 0 ? "N" : b.ToString())}</text>")
+    }
+    <circle cx="130" cy="130" r="7" fill="#ffe27a" stroke="#fff" stroke-width="1.5" />
+    @if (Bearing is int br)
+    {
+        var p = Pt(br, 104);
+        var q = Pt(br, 60);
+        <line x1="@F(130)" y1="@F(130)" x2="@F(p.x)" y2="@F(p.y)" stroke="#ffffff" stroke-width="1.5" stroke-dasharray="4 4" />
+        <circle cx="@F(p.x)" cy="@F(p.y)" r="8" fill="#ffffff" stroke="#0b1a2b" stroke-width="2" />
+        @((MarkupString)$"<text x=\"{F(q.x)}\" y=\"{F(q.y + 4)}\" text-anchor=\"middle\" font-size=\"12\" font-weight=\"700\" fill=\"#ffffff\">{MarkerText(br)}</text>")
+    }
+</svg>
+
+@code {
+    [Parameter, EditorRequired] public SectorLight Light { get; set; } = default!;
+    /// <summary>Observer's bearing from the light, shown as a marker.</summary>
+    [Parameter] public int? Bearing { get; set; }
+    /// <summary>Text next to the observer marker (defaults to the bearing from the light).</summary>
+    [Parameter] public string? MarkerLabel { get; set; }
+
+    private string MarkerText(int br) => System.Net.WebUtility.HtmlEncode(MarkerLabel ?? br.ToString("000") + "°");
+
+    private static string F(double d) => d.ToString("0.##", CultureInfo.InvariantCulture);
+
+    private static (double x, double y) Pt(double bearing, double r)
+    {
+        var rad = bearing * Math.PI / 180.0;
+        return (130 + r * Math.Sin(rad), 130 - r * Math.Cos(rad));
+    }
+
+    private static string Wedge(Sector s)
+    {
+        const double r = 104;
+        var w = s.Width == 0 ? 360 : s.Width;
+        if (w >= 360) return $"M130 {F(130 - r)} A{F(r)} {F(r)} 0 1 1 {F(129.9)} {F(130 - r)} Z";
+        var a = Pt(s.From, r);
+        var b = Pt(s.From + w, r);
+        var large = w > 180 ? 1 : 0;
+        return $"M130 130 L{F(a.x)} {F(a.y)} A{F(r)} {F(r)} 0 {large} 1 {F(b.x)} {F(b.y)} Z";
+    }
+}

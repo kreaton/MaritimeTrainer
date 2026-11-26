@@ -1,0 +1,89 @@
+@page "/progress"
+@implements IDisposable
+@inject ProgressService Progress
+@inject SettingsService Settings
+
+<PageTitle>Progress</PageTitle>
+
+<h1>📈 Progress</h1>
+
+<section class="panel summary">
+    <div><strong>@Progress.TotalAttempts</strong><span>answers</span></div>
+    <div><strong>@((int)Math.Round(Progress.Accuracy * 100))%</strong><span>accuracy</span></div>
+    <div><strong>@Progress.TotalCorrect</strong><span>correct</span></div>
+</section>
+
+<div class="legend">
+    @foreach (var m in Enum.GetValues<Mastery>())
+    {
+        <span class="legend-item"><span class="tile m-@m.ToString().ToLowerInvariant() mini"></span> @m</span>
+    }
+</div>
+
+@foreach (var d in Decks.All)
+{
+    var items = Decks.Items(d.Id, "all", Settings.Current.Region);
+    <section class="panel">
+        <h2>@d.Icon @d.Title</h2>
+        <div class="tiles">
+            @foreach (var i in items)
+            {
+                var s = Progress.Get(i.Id);
+                var level = ProgressService.LevelOf(s);
+                <div class="tile m-@level.ToString().ToLowerInvariant() @(d.Id == "buoys" ? "wide" : "")" title="@TileTitle(i, s)">@TileText(d, i)</div>
+            }
+        </div>
+        <p class="muted">@items.Count(i => Progress.LevelOf(i.Id) == Mastery.Mastered) of @items.Count mastered</p>
+        <div class="row gap wrap">
+            <a class="btn" href="quiz/@d.Id">Quiz</a>
+            <a class="btn" href="flashcards/@d.Id">Flashcards</a>
+        </div>
+    </section>
+}
+
+<section class="panel">
+    <h2>Reset</h2>
+    @if (!_confirm)
+    {
+        <button type="button" class="btn danger" @onclick="() => _confirm = true">Reset all progress…</button>
+    }
+    else
+    {
+        <p>This clears every score on this device. Are you sure?</p>
+        <div class="row gap">
+            <button type="button" class="btn danger" @onclick="ResetAsync">Yes, reset</button>
+            <button type="button" class="btn" @onclick="() => _confirm = false">Cancel</button>
+        </div>
+    }
+</section>
+
+@code {
+    private bool _confirm;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Progress.EnsureLoadedAsync();
+        await Settings.EnsureLoadedAsync();
+        Progress.Changed += OnChanged;
+    }
+
+    private void OnChanged() => _ = InvokeAsync(StateHasChanged);
+
+    private static string TileText(DeckInfo d, QuizItem i) => d.Id switch
+    {
+        "signals" => i[Rep.Symbol],
+        "lights" => i[Rep.LightAbbr],
+        _ => i.Label,
+    };
+
+    private static string TileTitle(QuizItem i, ItemStat s) =>
+        s.Attempts == 0 ? $"{i.Label} – not tried yet" : $"{i.Label} – {s.Correct}/{s.Attempts} correct, streak {s.Streak}";
+
+    private async Task ResetAsync()
+    {
+        await Progress.ResetAsync();
+        _confirm = false;
+    }
+
+    public void Dispose() => Progress.Changed -= OnChanged;
+}

@@ -1,0 +1,84 @@
+@page "/"
+@implements IDisposable
+@inject ProgressService Progress
+
+<PageTitle>Maritime Trainer</PageTitle>
+
+<section class="hero">
+    <h1>Maritime Trainer</h1>
+    <p class="lead">Learn signal flags, Morse, the phonetic alphabet, IALA buoyage and light characteristics – by sight, by ear and by doing.</p>
+</section>
+
+@if (Progress.TotalAttempts > 0)
+{
+    <section class="panel summary">
+        <div><strong>@Progress.TotalAttempts</strong><span>answers</span></div>
+        <div><strong>@((int)Math.Round(Progress.Accuracy * 100))%</strong><span>accuracy</span></div>
+        <div><strong>@_mastered / @_total</strong><span>mastered</span></div>
+        <a class="btn" href="progress">See progress</a>
+    </section>
+}
+
+<div class="deck-grid">
+    @foreach (var d in Decks.All)
+    {
+        <section class="deck">
+            <div class="deck-icon" aria-hidden="true">@d.Icon</div>
+            <h2>@d.Title</h2>
+            <p>@d.Blurb</p>
+            <div class="row gap wrap">
+                <a class="btn primary" href="quiz/@d.Id">Quiz</a>
+                <a class="btn" href="flashcards/@d.Id">Flashcards</a>
+                <a class="btn" href="@d.StudyPath">Study</a>
+            </div>
+        </section>
+    }
+    <section class="deck">
+        <div class="deck-icon" aria-hidden="true">🧭</div>
+        <h2>Sector lights</h2>
+        <p>Given a light's coloured sectors and your bearing from it – what colour do you see? Classic exam practice.</p>
+        <div class="row gap wrap">
+            <a class="btn primary" href="sectors">Practise</a>
+        </div>
+    </section>
+    <section class="deck">
+        <div class="deck-icon" aria-hidden="true">✍️</div>
+        <h2>Spell it</h2>
+        <p>Type any word and see it as flags, Morse and phonetics – then hear it in Morse.</p>
+        <div class="row gap wrap">
+            <a class="btn primary" href="spell">Open</a>
+        </div>
+    </section>
+</div>
+
+<section class="panel tip">
+    <h2>Tips</h2>
+    <ul>
+        <li>Morse is best learned by <em>sound</em>, not by looking at dots and dashes – start with <strong>Hear Morse → Letter</strong>.</li>
+        <li>Set character speed high and overall speed low (Settings) for Farnsworth spacing: letters sound at full speed with longer pauses.</li>
+        <li>During a quiz press <kbd>1</kbd>–<kbd>4</kbd> to answer, <kbd>Enter</kbd> for next, <kbd>R</kbd> to replay Morse.</li>
+        <li>Quizzes favour what you get wrong, so short, frequent sessions work best.</li>
+    </ul>
+</section>
+
+@code {
+    private int _mastered, _total;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Progress.EnsureLoadedAsync();
+        Progress.Changed += OnChanged;
+        Recount();
+    }
+
+    private void Recount()
+    {
+        var items = Decks.All.SelectMany(d => Decks.Items(d.Id, "all", Region.A)).ToList();
+        _total = items.Count;
+        _mastered = items.Count(i => Progress.LevelOf(i.Id) == Mastery.Mastered);
+    }
+
+    private void OnChanged() => _ = InvokeAsync(() => { Recount(); StateHasChanged(); });
+
+    public void Dispose() => Progress.Changed -= OnChanged;
+}

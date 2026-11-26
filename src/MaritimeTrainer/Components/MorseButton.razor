@@ -1,0 +1,52 @@
+@implements IDisposable
+@inject AudioService Audio
+
+<button type="button" class="play @Class @(_playing ? "playing" : "")" @onclick="Toggle" @onclick:stopPropagation="true"
+        aria-label="@(_playing ? "Stop" : "Play Morse")">
+    <span class="play-icon">@(_playing ? "■" : "▶")</span>
+    @if (!string.IsNullOrEmpty(Label)) { <span>@Label</span> }
+</button>
+
+@code {
+    private bool _playing;
+    private string? _autoPlayedFor;
+
+    /// <summary>Pattern to play ('.' '-' ' ' '/').</summary>
+    [Parameter, EditorRequired] public string Code { get; set; } = "";
+    [Parameter] public string? Label { get; set; }
+    [Parameter] public string? Class { get; set; }
+    /// <summary>Play as soon as this button appears (once per code).</summary>
+    [Parameter] public bool AutoPlay { get; set; }
+
+    protected override void OnInitialized() => Audio.StateChanged += OnAudioState;
+
+    private void OnAudioState()
+    {
+        var now = Audio.IsPlaying(Code);
+        if (now == _playing) return;
+        _playing = now;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (AutoPlay && _autoPlayedFor != Code)
+        {
+            _autoPlayedFor = Code;
+            await Audio.PlayMorseAsync(Code);
+        }
+    }
+
+    private async Task Toggle()
+    {
+        if (_playing) await Audio.StopAsync();
+        else await Audio.PlayMorseAsync(Code);
+    }
+
+    public void Dispose()
+    {
+        Audio.StateChanged -= OnAudioState;
+        // Only stop if our own sound is still the one playing (a new question may already have started another).
+        if (Audio.IsPlaying(Code)) _ = Audio.StopAsync();
+    }
+}

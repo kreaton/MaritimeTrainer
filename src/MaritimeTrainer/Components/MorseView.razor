@@ -1,0 +1,17 @@
+<span class="morse @Class" aria-label="@Spoken" role="img">
+    @foreach (var ch in Code)
+    {
+        if (ch == '.') { <i class="dit"></i> }
+        else if (ch == '-') { <i class="dah"></i> }
+        else if (ch == ' ') { <i class="lgap"></i> }
+        else if (ch == '/') { <i class="wgap"></i> }
+    }
+</span>
+
+@code {
+    /// <summary>Pattern of '.' and '-' (space between letters, '/' between words).</summary>
+    [Parameter, EditorRequired] public string Code { get; set; } = "";
+    [Parameter] public string? Class { get; set; }
+
+    private string Spoken => string.Join(' ', Code.Select(c => c switch { '.' => "dit", '-' => "dah", _ => "" }).Where(s => s.Length > 0));
+}

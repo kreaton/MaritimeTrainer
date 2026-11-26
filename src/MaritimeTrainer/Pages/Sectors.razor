@@ -1,0 +1,431 @@
+@page "/sectors"
+@inject ProgressService Progress
+@inject AudioService Audio
+@inject SettingsService Settings
+
+<PageTitle>Sector lights</PageTitle>
+
+<h1>🧭 Sector lights</h1>
+<p class="lead">
+    A sector light shows different colours over different arcs of the compass.
+    The diagram is drawn <strong>from the light outwards</strong>; light lists and charts give the sector limits
+    as bearings <strong>from seaward</strong> (from you towards the light).
+</p>
+
+<div class="chips tabs">
+    <button type="button" class="chip @(!_custom ? "active" : "")" @onclick="() => SetModeAsync(false)">Random lights</button>
+    <button type="button" class="chip @(_custom ? "active" : "")" @onclick="() => SetModeAsync(true)">My own light</button>
+</div>
+
+@if (_custom && !_customQuiz)
+{
+    <section class="panel sector-editor">
+        <h2>Your sector light</h2>
+        <div class="row gap wrap">
+            <label class="field">
+                <span>Characteristic (optional)</span>
+                <input type="text" @bind="_abbr" @bind:after="CustomChangedAsync" placeholder="e.g. Oc WRG 6s" spellcheck="false" />
+            </label>
+        </div>
+
+        <div class="q-hint">The bearings below are…</div>
+        <div class="chips">
+            <button type="button" class="chip @(_seaward ? "active" : "")" @onclick="() => SetSeawardAsync(true)">From seaward (as in light lists)</button>
+            <button type="button" class="chip @(!_seaward ? "active" : "")" @onclick="() => SetSeawardAsync(false)">From the light</button>
+        </div>
+
+        <table class="sector-table edit">
+            <thead><tr><th>Colour</th><th>From °</th><th>To °</th><th><span class="sr-only">Remove</span></th></tr></thead>
+            <tbody>
+                @foreach (var row in _rows)
+                {
+                    var r = row;
+                    <tr>
+                        <td>
+                            <span class="swatch" style="background:@SectorData.ColourHex(r.Colour)"></span>
+                            <select @bind="r.Colour" @bind:after="CustomChangedAsync" aria-label="Colour">
+                                @foreach (var c in SectorData.SectorColours)
+                                {
+                                    <option value="@c">@SectorData.ColourName(c)</option>
+                                }
+                            </select>
+                        </td>
+                        <td><input type="number" min="0" max="360" @bind="r.From" @bind:after="CustomChangedAsync" aria-label="From bearing" /></td>
+                        <td><input type="number" min="0" max="360" @bind="r.To" @bind:after="CustomChangedAsync" aria-label="To bearing" /></td>
+                        <td><button type="button" class="link" @onclick="() => RemoveRowAsync(r)" title="Remove sector">✕</button></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        <div class="row gap wrap">
+            <button type="button" class="btn" @onclick="AddRowAsync">+ Add sector</button>
+        </div>
+        <p class="muted small-note">Sectors run clockwise from “From” to “To”.</p>
+
+        <details class="paste" open="@(_pasteError is not null)">
+            <summary>Type or paste as text</summary>
+            <p class="muted small-note">Light-list style, e.g. <code>R 245-260, W 260-265, G 265-280</code> or <code>R 245°-260°, W -265°, G -280°</code> (a missing start continues from the sector before).</p>
+            <textarea rows="3" @bind="_pasteText" spellcheck="false" aria-label="Sectors as text"></textarea>
+            <div class="row gap wrap">
+                <button type="button" class="btn" @onclick="ApplyPasteAsync">Use this</button>
+                @if (_pasteError is not null) { <span class="notice">@_pasteError</span> }
+            </div>
+        </details>
+
+        @foreach (var e in _errors)
+        {
+            <div class="notice">@e</div>
+        }
+        @foreach (var w in _warnings)
+        {
+            <div class="notice warn-soft">@w</div>
+        }
+
+        @if (_customLight is not null)
+        {
+            <h3>Explore</h3>
+            <div class="sector-q">
+                <SectorView Light="@_customLight" Bearing="@ToLight(_probe)" MarkerLabel="you" />
+                <div class="sector-info">
+                    <label class="slider">
+                        <span>@(_seaward ? "The light bears" : "Your bearing from the light"): <strong>@_probe.ToString("000")°</strong></span>
+                        <input type="range" min="0" max="359" @bind="_probe" @bind:event="oninput" />
+                    </label>
+                    @{ var seen = _customLight.ColourAt(ToLight(_probe)); }
+                    <div class="probe-result">
+                        <span class="swatch big" style="background:@SectorData.ColourHex(seen)"></span>
+                        You see: <strong>@SectorData.ColourName(seen)</strong>
+                    </div>
+                    @if (_seaward)
+                    {
+                        <p class="muted small-note">Bearing from the light: @ToLight(_probe).ToString("000")°</p>
+                    }
+                    @if (Rhythm(_customLight) is { } prh)
+                    {
+                        var pspec = prh.InColour(BandHex(seen));
+                        <div class="sector-band">
+                            <div class="with-pic">
+                                <LightView Spec="@pspec" Class="small" />
+                                <span class="muted small-note">@(seen == "-" ? "Nothing – you are outside every sector." : $"{prh.Name}, {SectorData.ColourName(seen).ToLowerInvariant()}")</span>
+                            </div>
+                            <LightTimeline Spec="@pspec" Compact="true" />
+                        </div>
+                    }
+                    else
+                    {
+                        <p class="muted small-note">Type a characteristic such as Oc WRG 6s above to see its time band.</p>
+                    }
+                </div>
+            </div>
+        }
+    </section>
+    <div class="row gap wrap custom-next">
+        <button type="button" class="btn primary" disabled="@(_customLight is null)" @onclick="StartCustomQuiz">Quiz me on this light ▸</button>
+        <span class="muted">@(_customLight is null ? "Fix the sectors above first." : "The quiz hides the slider and asks you to work out the colour yourself.")</span>
+    </div>
+}
+
+@if (_light is not null && (!_custom || _customQuiz))
+{
+    @if (_custom)
+    {
+        <div class="row gap wrap quiz-head">
+            <h2>Quiz on your light</h2>
+            <button type="button" class="btn" @onclick="EditCustom">✎ Edit my light</button>
+        </div>
+    }
+    else
+    {
+        <h2>Drill</h2>
+    }
+    <div class="hud">
+        <span class="hud-item">Correct <strong>@_right / @_total</strong></span>
+        <span class="hud-item">🔥 <strong>@_streak</strong></span>
+    </div>
+
+    <section class="sector-q">
+        @* your position is only revealed once you have answered *@
+        <SectorView Light="@_light" Bearing="@(_answered ? _bearing : null)" MarkerLabel="@(UseSeaward ? "you" : null)" />
+        <div class="sector-info">
+            <div class="q-hint">Characteristic: <code class="rep-abbr">@_light.Abbr</code></div>
+            <table class="sector-table">
+                <thead><tr><th>Colour</th><th>From</th><th>To</th></tr></thead>
+                <tbody>
+                    @if (_custom)
+                    {
+                        foreach (var s in _rows)
+                        {
+                            <tr>
+                                <td><span class="swatch" style="background:@SectorData.ColourHex(s.Colour)"></span> @SectorData.ColourName(s.Colour)</td>
+                                <td>@SectorData.Norm(s.From).ToString("000")°</td>
+                                <td>@SectorData.Norm(s.To).ToString("000")°</td>
+                            </tr>
+                        }
+                    }
+                    else
+                    {
+                        foreach (var s in _light.Sectors)
+                        {
+                            <tr>
+                                <td><span class="swatch" style="background:@SectorData.ColourHex(s.Colour)"></span> @SectorData.ColourName(s.Colour)</td>
+                                <td>@s.From.ToString("000")°</td>
+                                <td>@s.To.ToString("000")°</td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+            <p class="muted">@(UseSeaward ? "Bearings from seaward. " : "Bearings from the light. ")Anywhere else the light is not visible.</p>
+            @if (Rhythm(_light) is { } rh)
+            {
+                @* before answering the band shows only the rhythm (grey) – the colour would give the answer away *@
+                <div class="sector-band">
+                    <div class="small-note muted">
+                        @if (!_answered) { <text>Rhythm – the colour depends on where you are</text> }
+                        else if (_truth == "-") { <text>From here: no light at all</text> }
+                        else { <text>From here: @SectorData.ColourName(_truth).ToLowerInvariant()</text> }
+                    </div>
+                    <LightTimeline Spec="@rh.InColour(BandHex(_answered ? _truth : null))" Compact="true" />
+                </div>
+            }
+        </div>
+    </section>
+
+    <section class="qcard">
+        <div class="q-hint">
+            @if (UseSeaward)
+            {
+                <text>The light bears <strong>@Show(_bearing).ToString("000")°</strong> from you. What do you see?</text>
+            }
+            else
+            {
+                <text>You are on a bearing of <strong>@_bearing.ToString("000")°</strong> from the light. What do you see?</text>
+            }
+        </div>
+    </section>
+
+    <div class="choices textual">
+        @foreach (var c in _answers)
+        {
+            var code = c;
+            <button type="button" class="choice @ChoiceClass(code)" @onclick="() => AnswerAsync(code)" disabled="@(_answered)">
+                <span class="swatch" style="background:@SectorData.ColourHex(code)"></span>
+                <span>@SectorData.ColourName(code)</span>
+            </button>
+        }
+    </div>
+
+    @if (_answered)
+    {
+        <section class="feedback @(_correct ? "good" : "bad")">
+            <div class="fb-head">
+                <strong>@(_correct ? "Correct!" : "Not quite")</strong>
+                <button type="button" class="btn primary" @onclick="NextAsync">Next ▸</button>
+            </div>
+            <p>
+                At @Show(_bearing).ToString("000")° the light shows <strong>@SectorData.ColourName(_truth).ToLowerInvariant()</strong>@(_truth == "-" ? "." : " – you are in that sector.")
+                @if (_truth == "W") { <text> White is normally the safe, navigable sector.</text> }
+            </p>
+        </section>
+    }
+}
+
+@code {
+    private const string DefaultSectors = "R 245-260, W 260-265, G 265-280";
+    private readonly Random _rng = new();
+    private SectorLight? _light;
+    private int _bearing;
+    private string _truth = "-";
+    private bool _answered, _correct;
+    private string? _picked;
+    private int _right, _total, _streak;
+    private string[] _answers = ["W", "R", "G", "-"];
+
+    // own light
+    private bool _custom;
+    /// <summary>In "My own light": false while editing/exploring, true while being quizzed (editor and slider hidden).</summary>
+    private bool _customQuiz;
+    private List<SectorData.Row> _rows = [];
+    private bool _seaward = true;
+    private string _abbr = "";
+    private SectorLight? _customLight;
+    private List<string> _errors = [], _warnings = [];
+    private int _probe;
+    private string _pasteText = "";
+    private string? _pasteError;
+
+    private bool UseSeaward => _custom && _seaward;
+
+    private readonly Dictionary<string, LightParser.Result?> _rhythms = [];
+
+    /// <summary>The light's characteristic (e.g. "Oc WRG 6s") read as a rhythm; null if it can't be read.</summary>
+    private LightParser.Result? Rhythm(SectorLight light)
+    {
+        if (!_rhythms.TryGetValue(light.Abbr, out var r))
+            _rhythms[light.Abbr] = r = LightParser.TryParse(light.Abbr, out var res, out _) ? res : null;
+        return r;
+    }
+
+    /// <summary>Band colour for a sector code; grey while the colour is still a secret; black (dark) when not visible.</summary>
+    private static string BandHex(string? code) => code switch
+    {
+        null => "#9aa7b4",
+        "W" => Lights.W,
+        "R" => Lights.R,
+        "G" => Lights.G,
+        "Y" => Lights.Y,
+        _ => "#000000",
+    };
+
+    /// <summary>A bearing from the light, shown in the user's convention.</summary>
+    private int Show(int fromLight) => UseSeaward ? SectorData.Norm(fromLight + 180) : fromLight;
+
+    /// <summary>A bearing in the user's convention, turned into a bearing from the light.</summary>
+    private int ToLight(int b) => _seaward ? SectorData.Norm(b + 180) : SectorData.Norm(b);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Task.WhenAll(Progress.EnsureLoadedAsync(), Settings.EnsureLoadedAsync());
+        var st = Settings.Current;
+        _seaward = st.SectorsFromSeaward;
+        _abbr = st.CustomSectorAbbr;
+        if (!SectorData.TryParseRows(string.IsNullOrWhiteSpace(st.CustomSectors) ? DefaultSectors : st.CustomSectors, out _rows, out _))
+            SectorData.TryParseRows(DefaultSectors, out _rows, out _);
+        _pasteText = SectorData.Format(_rows);
+        RebuildCustom();
+        _probe = _rows.Count > 0 ? SectorData.Norm(_rows[0].From + 5) : 0;
+        NewQuestion();
+    }
+
+    private void RebuildCustom()
+    {
+        _errors = [];
+        _warnings = [];
+        _customLight = SectorData.BuildLight(_rows, _seaward, _abbr, _errors, _warnings);
+    }
+
+    private async Task SaveCustomAsync()
+    {
+        Settings.Current.CustomSectors = SectorData.Format(_rows);
+        Settings.Current.CustomSectorAbbr = _abbr;
+        Settings.Current.SectorsFromSeaward = _seaward;
+        await Settings.SaveAsync();
+    }
+
+    private async Task CustomChangedAsync()
+    {
+        RebuildCustom();
+        _pasteText = SectorData.Format(_rows);
+        _pasteError = null;
+        await SaveCustomAsync();
+        if (_custom) NewQuestion();
+    }
+
+    private async Task SetModeAsync(bool custom)
+    {
+        if (_custom == custom) return;
+        _custom = custom;
+        _customQuiz = false;
+        _right = _total = _streak = 0;
+        NewQuestion();
+        await Task.CompletedTask;
+    }
+
+    private void StartCustomQuiz()
+    {
+        if (_customLight is null) return;
+        _customQuiz = true;
+        _right = _total = _streak = 0;
+        NewQuestion();
+    }
+
+    private void EditCustom() => _customQuiz = false;
+
+    private async Task SetSeawardAsync(bool seaward)
+    {
+        if (_seaward == seaward) return;
+        _seaward = seaward;
+        await CustomChangedAsync();
+    }
+
+    private async Task AddRowAsync()
+    {
+        var last = _rows.Count > 0 ? _rows[^1] : null;
+        var from = last?.To ?? 0;
+        _rows.Add(new SectorData.Row { Colour = "W", From = from, To = SectorData.Norm(from + 10) });
+        await CustomChangedAsync();
+    }
+
+    private async Task RemoveRowAsync(SectorData.Row row)
+    {
+        _rows.Remove(row);
+        await CustomChangedAsync();
+    }
+
+    private async Task ApplyPasteAsync()
+    {
+        if (!SectorData.TryParseRows(_pasteText, out var rows, out var err))
+        {
+            _pasteError = err;
+            return;
+        }
+        _rows = rows;
+        await CustomChangedAsync();
+    }
+
+    private void NewQuestion()
+    {
+        _answered = false;
+        _picked = null;
+        _light = _custom ? _customLight : SectorData.Random(_rng);
+        if (_light is null) return;
+
+        _answers = _custom
+            ? new[] { "W", "R", "G" }.Union(_light.Sectors.Select(s => s.Colour)).Append("-").ToArray()
+            : ["W", "R", "G", "-"];
+
+        // Bias towards interesting bearings: inside a sector, near an edge, or anywhere at all.
+        var roll = _rng.Next(10);
+        if (roll < 6)
+        {
+            var s = _light.Sectors[_rng.Next(_light.Sectors.Count)];
+            _bearing = (s.From + _rng.Next(0, Math.Max(1, s.Width))) % 360;
+        }
+        else if (roll < 8)
+        {
+            var s = _light.Sectors[_rng.Next(_light.Sectors.Count)];
+            _bearing = ((_rng.Next(2) == 0 ? s.From - _rng.Next(1, 6) : s.To + _rng.Next(0, 5)) % 360 + 360) % 360;
+        }
+        else
+        {
+            _bearing = _rng.Next(0, 360);
+        }
+        _truth = _light.ColourAt(_bearing);
+    }
+
+    private async Task AnswerAsync(string code)
+    {
+        if (_answered) return;
+        _answered = true;
+        _picked = code;
+        _correct = code == _truth;
+        _total++;
+        if (_correct) { _right++; _streak++; } else _streak = 0;
+        await Progress.RecordAsync("sector:drill", _correct);
+        await Audio.ChimeAsync(_correct);
+    }
+
+    private Task NextAsync()
+    {
+        NewQuestion();
+        return Task.CompletedTask;
+    }
+
+    private string ChoiceClass(string code)
+    {
+        if (!_answered) return "";
+        if (code == _truth) return "right";
+        if (code == _picked) return "wrong";
+        return "dim";
+    }
+}

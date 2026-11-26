@@ -1,0 +1,17 @@
+@if (FlagArt.Exists(Id))
+{
+    <span class="flag @Class" role="img" aria-label="@Label">@((MarkupString)FlagArt.Svg(Id, _clipId, Height))</span>
+}
+
+@code {
+    private static int _counter;
+    private readonly string _clipId = "fc" + Interlocked.Increment(ref _counter);
+
+    /// <summary>Letter A–Z, digit 0–9, or "ANS" for the code/answering pennant.</summary>
+    [Parameter, EditorRequired] public string Id { get; set; } = "A";
+    [Parameter] public int Height { get; set; } = 96;
+    [Parameter] public string? Class { get; set; }
+
+    private string Label => Id == "ANS" ? "Code and answering pennant"
+        : char.IsDigit(Id[0]) ? $"Numeral pennant {Id}" : $"Signal flag {Id}";
+}

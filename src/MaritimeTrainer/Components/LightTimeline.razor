@@ -1,0 +1,106 @@
+@using System.Globalization
+@implements IDisposable
+@inject IJSRuntime JS
+
+@* A light's cycle drawn as a band over time: lit = the light's colour (white for W), dark = black.
+   A playhead runs along it in step with the animated lamp. *@
+<div class="ltl @(Compact ? "compact" : "")" role="img" aria-label="@_aria">
+    <div class="ltl-track" @ref="_el">
+        <svg class="ltl-band" viewBox="0 0 @F(_window * 100) 10" preserveAspectRatio="none" focusable="false">
+            <rect x="0" y="0" width="@F(_window * 100)" height="10" fill="#000" />
+            @foreach (var (x, w, fill, op) in _rects)
+            {
+                <rect x="@F(x * 100)" y="0" width="@F(w * 100)" height="10" fill="@fill" fill-opacity="@F(op)" />
+            }
+        </svg>
+        @for (var i = 1; i < _repeats; i++)
+        {
+            <span class="ltl-period" style="left:@F(i * _period / _window * 100)%"></span>
+        }
+        <span class="ltl-head"></span>
+    </div>
+    <div class="ltl-axis">
+        @foreach (var t in _ticks)
+        {
+            <span class="ltl-tick @(t.Label ? "lbl" : "")" style="left:@F(t.At / _window * 100)%"><i>@(t.Label ? F(t.At) : "")</i></span>
+        }
+    </div>
+    @if (!Compact)
+    {
+        <div class="ltl-cap muted">
+            @if (_repeats > 1)
+            {
+                <text>Seconds · @_repeats cycles shown, period @F(_period) s</text>
+            }
+            else
+            {
+                <text>Seconds · one period = @F(_period) s</text>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private ElementReference _el;
+    private string? _started;
+    private double _period, _window;
+    private int _repeats = 1;
+    private List<(double X, double W, string Fill, double Op)> _rects = [];
+    private List<(double At, bool Label)> _ticks = [];
+    private string _aria = "";
+
+    [Parameter, EditorRequired] public LightSpec Spec { get; set; } = default!;
+    [Parameter] public bool Compact { get; set; }
+
+    private static string F(double d) => d.ToString("0.##", CultureInfo.InvariantCulture);
+
+    public static string Signature(LightSpec s) =>
+        string.Join(";", s.Cycle.Select(c => $"{F(c.Seconds)},{c.Colour},{F(c.Level)}"));
+
+    /// <summary>White lights are drawn pure white on the band so it reads as black/white.</summary>
+    private static string BandColour(string c) => c == Lights.W ? "#ffffff" : c;
+
+    protected override void OnParametersSet()
+    {
+        _period = Spec.Period;
+        // short continuous rhythms (Q, VQ, UQ, F) are repeated so the band spans a few seconds
+        _repeats = _period >= 3 ? 1 : (int)Math.Ceiling(3 / _period - 1e-9);
+        _window = _period * _repeats;
+
+        _rects = [];
+        double t = 0;
+        for (var r = 0; r < _repeats; r++)
+            foreach (var seg in Spec.Cycle)
+            {
+                if (seg.Colour is not null) _rects.Add((t, seg.Seconds, BandColour(seg.Colour), seg.Level));
+                t += seg.Seconds;
+            }
+
+        var step = _window <= 4 ? 0.5 : _window <= 12 ? 1 : _window <= 30 ? 2 : 5;
+        var labelEvery = _window <= 4 ? 1 : _window <= 12 ? (Compact ? 2 : 1) : _window <= 30 ? (Compact ? 6 : 2) : 10;
+        _ticks = [];
+        for (var i = 0; i * step <= _window + 1e-6; i++)
+        {
+            var at = Math.Round(i * step, 3);
+            var label = Math.Abs(at / labelEvery - Math.Round(at / labelEvery)) < 1e-6;
+            _ticks.Add((at, label));
+        }
+
+        var lit = Spec.Cycle.Where(c => c.Colour is not null && c.Level >= 0.99).Sum(c => c.Seconds);
+        _aria = $"Time band for {Spec.Abbr}: period {F(_period)} seconds, light {F(lit)} s and dark {F(_period - lit)} s in each cycle";
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        var sig = Signature(Spec);
+        if (_started == sig) return;
+        _started = sig;
+        try { await JS.InvokeVoidAsync("trainer.startTimeline", _el, _period, _window); }
+        catch { /* playhead is a nicety */ }
+    }
+
+    public void Dispose()
+    {
+        try { _ = JS.InvokeVoidAsync("trainer.stopTimeline", _el); } catch { }
+    }
+}

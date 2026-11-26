@@ -1,0 +1,26 @@
+@inject SettingsService Settings
+
+<span class="buoy @Class" role="img" aria-label="@(_mark?.Name ?? "Buoy")">@((MarkupString)_svg)</span>
+
+@code {
+    private static int _counter;
+    private readonly string _uid = "bu" + Interlocked.Increment(ref _counter);
+    private MarkSpec? _mark;
+    private string _svg = "";
+
+    /// <summary>Mark id such as "port", "north" or "safe".</summary>
+    [Parameter, EditorRequired] public string MarkId { get; set; } = "";
+    [Parameter] public int Height { get; set; } = 190;
+    [Parameter] public string? Class { get; set; }
+    /// <summary>Show only the topmark.</summary>
+    [Parameter] public bool TopmarkOnly { get; set; }
+    /// <summary>Override the region from the settings (used by the A-vs-B comparison).</summary>
+    [Parameter] public Region? RegionOverride { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        var region = RegionOverride ?? Settings.Current.Region;
+        _mark = Marks.Get(MarkId, region);
+        _svg = TopmarkOnly ? BuoyArt.TopmarkSvg(_mark, Height) : BuoyArt.Svg(_mark, _uid, Height);
+    }
+}

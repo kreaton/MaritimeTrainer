@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Maritime Trainer icon: the app's anchor (the ⚓ emoji, Segoe UI Emoji / Fluent design) on the app's
+       night-sea blue, with a light swell at the bottom. The anchor sits inside the maskable safe zone
+       (a circle of 40 % radius), so the same picture is used for the maskable icon. -->
+  <defs>
+    <radialGradient id="sea" cx="50%" cy="30%" r="80%">
+      <stop offset="0" stop-color="#1f5a8a" />
+      <stop offset=".55" stop-color="#0d2e4d" />
+      <stop offset="1" stop-color="#071a2c" />
+    </radialGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#000" flood-opacity=".45" />
+    </filter>
+  </defs>
+
+  <rect width="1024" height="1024" fill="url(#sea)" />
+  <circle cx="512" cy="500" r="330" fill="#4cc2ff" fill-opacity=".10" />
+  <path d="M0 850 Q128 805 256 850 T512 850 T768 850 T1024 850 V1024 H0 Z" fill="#1f6a9a" fill-opacity=".55" />
+  <path d="M0 850 Q128 805 256 850 T512 850 T768 850 T1024 850" fill="none" stroke="#a9d6f0" stroke-width="10" stroke-opacity=".55" />
+
+  <text x="512" y="505" text-anchor="middle" dominant-baseline="central" filter="url(#glow)"
+        font-family="'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji', sans-serif" font-size="500">⚓</text>
+</svg>
