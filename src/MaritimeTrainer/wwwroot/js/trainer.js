@@ -39,21 +39,52 @@ window.trainer = (() => {
     // ---------------------------------------------------------------- Web Audio
     let ctx = null, master = null, active = [], endTimer = null, endResolve = null;
 
+    // iPhone Safari plays Web Audio as "ambient" sound by default, so the Ring/Silent switch mutes it
+    // (an iPad has no such switch, and music apps play as media). Asking for the "playback" session
+    // makes the Morse tones behave like media and play in silent mode too.
+    function preferPlaybackSession() {
+        try {
+            if (navigator.audioSession) { navigator.audioSession.type = 'playback'; return; }  // Safari 16.4+
+        } catch (e) { /* not allowed – fall through */ }
+        // Older iOS: playing any <audio> element switches the page to the playback session. A short
+        // silent clip, started inside the user's tap, is enough.
+        if (!silentEl && /iP(hone|od|ad)/.test(navigator.userAgent)) {
+            silentEl = new Audio(SILENT_WAV);
+            silentEl.setAttribute('playsinline', '');
+            silentEl.play().catch(() => { /* blocked – nothing more we can do */ });
+        }
+    }
+
+    // 0.1 s of 8 kHz 8-bit silence
+    const SILENT_WAV = 'data:audio/wav;base64,UklGRkQDAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YSADAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgA==';
+    let silentEl = null;
+
     function ensure() {
         if (!ctx) {
+            preferPlaybackSession();
             const AC = window.AudioContext || window.webkitAudioContext;
             ctx = new AC();
             master = ctx.createGain();
             master.connect(ctx.destination);
         }
-        if (ctx.state === 'suspended') ctx.resume();
+        // "suspended" before the first tap; "interrupted" on iOS after a call or switching apps
+        if (ctx.state !== 'running') ctx.resume().catch(() => { });
         return ctx;
     }
 
-    // Browsers only start audio after a gesture: prepare it on the first tap/key press anywhere.
-    const unlock = () => { try { ensure(); } catch (e) { /* no audio available */ } };
-    window.addEventListener('pointerdown', unlock, { once: true, capture: true });
-    window.addEventListener('keydown', unlock, { once: true, capture: true });
+    // Browsers only start audio after a gesture, so (re)start it on taps and key presses until it runs.
+    // touchend is the gesture older iOS versions accept for audio.
+    const unlock = () => {
+        if (ctx && ctx.state === 'running') return;
+        try {
+            const c = ensure();
+            // a one-sample silent buffer, played inside the gesture, wakes the output on iOS
+            const b = c.createBuffer(1, 1, 22050), src = c.createBufferSource();
+            src.buffer = b; src.connect(c.destination); src.start(0);
+        } catch (e) { /* no audio available */ }
+    };
+    for (const ev of ['pointerdown', 'touchend', 'keydown'])
+        window.addEventListener(ev, unlock, { capture: true, passive: true });
 
     function stop() {
         for (const o of active) { try { o.stop(); } catch (e) { /* already stopped */ } }
@@ -62,10 +93,12 @@ window.trainer = (() => {
         if (endResolve) { const r = endResolve; endResolve = null; r(); }
     }
 
-    function playMorse(pattern, charWpm, effWpm, freq, volume) {
+    async function playMorse(pattern, charWpm, effWpm, freq, volume) {
         stop();
         let c;
-        try { c = ensure(); } catch (e) { return Promise.resolve(); }
+        try { c = ensure(); } catch (e) { return; }
+        // a suspended context's clock stands still: wait until it runs before scheduling the tones
+        if (c.state !== 'running') { try { await c.resume(); } catch (e) { return; } }
         const ev = schedule(pattern, charWpm, effWpm);
         const t0 = c.currentTime + 0.08;
         master.gain.cancelScheduledValues(c.currentTime);
