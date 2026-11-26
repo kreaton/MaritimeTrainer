@@ -44,6 +44,10 @@ It is a Blazor WebAssembly app (.NET 10) that runs entirely in the browser, with
 
 `1`–`4` choose an answer, `Enter` / `Space` / `→` next, `.` and `-` key Morse, `R` replays the sound.
 
+## Related app
+
+**[Ship Lights](https://github.com/kreaton/ShipLights)** ([try it](https://kreaton.github.io/ShipLights/)) covers the lights carried by vessels rather than by marks: see a set of lights on a black night, say what she is (trawler, sailing vessel, tug and tow, not under command…), which way she is going and what you do under the COLREGs, then see the situation from above.
+
 ## Caveats
 
 - This is a training aid. It does not replace the official publications: ICS Pub. 102 (International Code of Signals), IALA R1001 (the Maritime Buoyage System), your chart and the list of lights.
